@@ -1,4 +1,4 @@
-# Fire AI — Senior Data Scientist Take-Home
+# fireai_assignement — Senior Data Scientist Take-Home
 
 Two projects in one repo:
 
@@ -6,6 +6,9 @@ Two projects in one repo:
 - **Project B** — Geo-level marketing mix model with experiment calibration (Google Meridian sample data)
 
 ## Quick start
+
+Requires **Python 3.12 or 3.13** (needed by Project B's Meridian/JAX; Project A alone works on 3.10+).
+Both projects share one environment — all packages were installed and tested together.
 
 ```bash
 python -m venv .venv
