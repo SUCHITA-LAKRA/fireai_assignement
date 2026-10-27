@@ -1,0 +1,17 @@
+# Data is public and large — download it, don't commit it
+data/raw/**
+!data/raw/**/.gitkeep
+data/processed/**
+!data/processed/.gitkeep
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/
+.ipynb_checkpoints/
+
+# OS / editor
+.DS_Store
+.vscode/
+.idea/

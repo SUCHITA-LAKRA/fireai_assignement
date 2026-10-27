@@ -1,0 +1,59 @@
+# Project A — all assumptions in one place.
+# Change numbers here, never inside the code.
+# (In the interview they will change assumptions live — this file is where.)
+
+paths:
+  raw_dir: data/raw/m5
+  processed_dir: data/processed
+  output_dir: outputs/project_a
+
+scope:
+  state: CA
+  stores: [CA_1, CA_2, CA_3, CA_4]
+  category: FOODS
+  departments: [FOODS_1, FOODS_2, FOODS_3]
+
+time:
+  default_cutoff: 1885        # last training day; overridden by --cutoff
+  test_days: 56               # days replayed after the cutoff
+  forecast_horizon: 28        # days ahead per forecast
+  backtest_cutoffs: [1773, 1801, 1829, 1857]   # all before 1885, 28 days apart
+
+lead_times:
+  supplier_to_dc:             # lognormal, mean in days, coefficient of variation
+    FOODS_1: {mean: 5,  cv: 0.4}
+    FOODS_2: {mean: 7,  cv: 0.4}
+    FOODS_3: {mean: 10, cv: 0.4}
+  dc_to_store_days: 2
+
+review:
+  store_orders: daily
+  dc_order_weekday: Monday
+
+costs:
+  holding_rate_per_year: 0.25       # x selling price, per unit per year
+  lost_sale_rate: 0.35              # x selling price, per unit lost
+  po_cost_per_department: 50.0      # $ per purchase order per department
+  transfer_cost_per_unit: 0.05      # $ per unit DC -> store
+
+capacity:
+  dc_outbound_multiplier: 1.25      # x avg daily CA FOODS sales, last 365 training days
+  dc_outbound_lookback_days: 365
+  store_max_days_of_sales: 21
+
+starting_stock:
+  days_of_avg_sales: 7              # at every location, including the DC
+
+service:
+  target_fill_rate: 0.95
+
+stress_test:
+  department: FOODS_3
+  lead_time_multiplier: 2.0
+  duration_days: 21
+  start_offset_days: 14             # days after test start when the disruption begins
+  warning_days: 14
+
+simulation:
+  n_seeds: 20
+  random_seed: 42
