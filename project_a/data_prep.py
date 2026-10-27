@@ -54,7 +54,9 @@ def wide_to_long(sales: pd.DataFrame) -> pd.DataFrame:
 
     # Day number as an integer (d_1 -> 1). Makes cutoffs easy later.
     long["day"] = long["d"].str.replace("d_", "", regex=False).astype("int16")
-    long["sales"] = long["sales"].astype("int16")
+    # int32, not int16: sums across items/stores can exceed 32,767 and
+    # pandas keeps the dtype when summing, so int16 would silently overflow.
+    long["sales"] = long["sales"].astype("int32")
     return long
 
 
