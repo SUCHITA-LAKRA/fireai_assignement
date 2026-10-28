@@ -4,6 +4,11 @@ data/raw/**
 data/processed/**
 !data/processed/.gitkeep
 
+# Charts and tables are re-created by `make all` - don't commit them
+outputs/**
+!outputs/*/
+!outputs/**/.gitkeep
+
 # Python
 __pycache__/
 *.pyc

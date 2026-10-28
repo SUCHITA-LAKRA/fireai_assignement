@@ -1,0 +1,164 @@
+# Project B — all assumptions in one place.
+# Change numbers here, never inside the code.
+
+paths:
+  raw_file: data/raw/meridian/geo_all_channels.csv
+  processed_dir: data/processed
+  output_dir: outputs/project_b
+
+columns:
+  geo: geo
+  time: time
+  paid_channels: [Channel0, Channel1, Channel2, Channel3, Channel4]
+  organic_channels: [Organic_channel0]
+  non_media_treatments: [Promo]
+  controls: [competitor_sales_control, sentiment_score_control]
+  kpi: conversions
+  revenue_per_kpi: revenue_per_conversion
+  population: population
+
+holdout:
+  weeks: 13                   # hold out 13 weeks for validation
+  default_start: null         # null = the last 13 weeks; overridden by --holdout-start
+
+budget:
+  next_quarter_total: 18000000
+  scenarios: [12000000, 18000000, 24000000]
+  weeks: 13
+  max_change_vs_last_13w: 0.30   # each channel may move at most +/-30%
+
+experiment:                   # vendor geo-lift test on Channel3 (as reported)
+  channel: Channel3
+  test_geos: [Geo0, Geo1, Geo2, Geo3, Geo4, Geo5, Geo6, Geo7]
+  start: "2023-06-05"
+  weeks: 8
+  reported_iroas: 0.8
+  reported_ci90: [0.3, 1.3]
+  pre_period_weeks: 8         # weeks before the test used for the "did spend drop?" check
+  # --- Step 5: how much we trust the vendor's result -----------------------
+  # The vendor's result becomes a log-normal on Channel3's ROI during the test
+  # weeks: median 0.8, spread matching the reported 90% interval (0.3-1.3).
+  # It is counted at a fraction `trust_weight` of its full weight (a "power
+  # prior"): its uncertainty is multiplied by 1/sqrt(trust_weight), then it is
+  # combined with our usual ROI prior. 0 = ignore, 1 = full weight.
+  # 0.25 = its uncertainty is doubled. (docs/DECISIONS_PROJECT_B_DETAIL.md, B28)
+  trust_weight: 0.25
+  trust_weights_to_compare: [1.0]   # also fitted, to show what full trust would do
+
+random_seed: 42
+
+# --- Step 8: next experiment ------------------------------------------------
+next_experiment:
+  info_horizon_quarters: 4      # a test result informs about a year of budget decisions
+  treated_region_options: [8, 10, 20]
+  week_options: [6, 8, 12]
+  pre_period_weeks: 52          # history used to learn how treated regions track controls
+  n_fake_experiments: 2000      # fake tests on past weeks, to measure noise
+
+# ---------------------------------------------------------------------------
+# Step 3 - the geo-level Bayesian model (Meridian)
+# Every prior is written here with the reason for it. Change a number here,
+# re-run `python -m project_b.fit_model`, and every later step picks it up.
+# ---------------------------------------------------------------------------
+model:
+  max_lag: 8                  # weeks an ad can keep working (adstock window)
+  knot_spacing_weeks: 13      # one time-effect knot per quarter (see docs/DECISIONS_PROJECT_B_DETAIL.md, B16)
+  sampling:                   # full run (used for every number in the memo)
+    n_chains: 4
+    n_adapt: 1000
+    n_burnin: 500
+    n_keep: 500
+    seed: 42
+  quick_sampling:             # `--quick`: a fast smoke test, NOT for results
+    n_chains: 2
+    n_adapt: 60
+    n_burnin: 40
+    n_keep: 60
+  prior_draws: 500            # draws for the prior-predictive check
+  max_rhat: 1.1               # convergence gate: above this, results are not trusted
+
+  priors:
+    roi_m:                    # paid media ROI (revenue per 1 spent), same for every channel
+      dist: LogNormal
+      loc: 0.2
+      scale: 0.9
+      why: >-
+        Median 1.22, 90% between 0.28 and 5.4. Centred just above break-even,
+        wide enough for a loss-making channel or a star. Same for all channels:
+        before the experiment (step 5) we have no channel-specific evidence.
+        Sanity bound: all revenue / all paid spend = 6.0, so ROIs far above 5 are implausible.
+    alpha_m:                  # adstock decay per week (0 = gone next week, 1 = never fades)
+      dist: Uniform
+      low: 0.0
+      high: 1.0
+      why: No evidence on how long each channel's effect lasts; let the data decide.
+    ec_m:                     # half-saturation point (relative to the channel's median weekly impressions)
+      dist: TruncatedNormal
+      loc: 0.8
+      scale: 0.8
+      low: 0.1
+      high: 10.0
+      why: >-
+        Allows anything from strong diminishing returns (0.1) to almost linear (10).
+        Centred near typical spend levels, where saturation usually starts to bite.
+    slope_m:                  # Hill slope: fixed at 1 = a smooth bend, no S-shape
+      dist: Deterministic
+      value: 1.0
+      why: >-
+        With weekly impressions an S-curve is rarely identifiable; fixing the slope
+        keeps the half-saturation point estimable. Standard choice for impression data.
+    contribution_om:          # organic media share of revenue
+      dist: Beta
+      a: 1.0
+      b: 99.0
+      why: >-
+        Mean 1% of revenue, most mass below 3%. Step 1 found organic barely
+        relates to revenue once paid media and controls are in.
+    contribution_n:           # promo share of revenue (can be negative)
+      dist: TruncatedNormal
+      loc: 0.0
+      scale: 0.1
+      low: -1.0
+      high: 1.0
+      why: Centred on no effect, +/-10% of revenue is plausible; data decides the sign.
+    sigma:                    # noise
+      dist: HalfNormal
+      scale: 5.0
+      why: Weakly informative on the standardised revenue scale.
+
+    # --- Baseline priors: tightened after the prior-predictive check -------
+    # Meridian's defaults (Normal(0, 5) / HalfNormal(5)) let weekly revenue go
+    # negative in 24% of national weeks and 35% of region-weeks before seeing
+    # any data. Revised values below cut that to 4% / 12% while the prior band
+    # still contains actual revenue in every week. (docs/DECISIONS_PROJECT_B_DETAIL.md, B22)
+    # Units: standard deviations of weekly revenue per person.
+    knot_values:              # national time level at each knot
+      dist: Normal
+      loc: 0.0
+      scale: 2.0
+      why: >-
+        Lets the national level move +/-2 sd from the average, enough room for
+        paid media to take anything from ~0 to ~half of revenue. 5 sd allowed
+        negative revenue.
+    tau_g_excl_baseline:      # each region's baseline vs the reference region
+      dist: Normal
+      loc: 0.0
+      scale: 1.0
+      why: >-
+        Regions differ by about +/-1 sd in revenue per person (16-26 conversions
+        per person vs mean 19.3, sd 6.3). Normal(0, 1) covers that range.
+    gamma_c:                  # effect of the two controls (on the standardised scale)
+      dist: Normal
+      loc: 0.0
+      scale: 2.0
+      why: >-
+        Controls are standardised; an effect of 2 sd of revenue per 1 sd of a
+        control is already very large. 5 sd was implausibly wide.
+    xi_c:                     # how much control effects vary between regions
+      dist: HalfNormal
+      scale: 0.5
+      why: Regions should react to competitors and sentiment in a broadly similar way.
+    xi_n:                     # how much the promo effect varies between regions
+      dist: HalfNormal
+      scale: 0.5
+      why: Same reasoning as xi_c, for promo.

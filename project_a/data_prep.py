@@ -21,11 +21,28 @@ later steps, so the simulator can still replay the days after the cutoff.
 """
 
 import argparse
+import sys
 from pathlib import Path
 
 import pandas as pd
 
-from project_a.config import load_config
+# Lets the file run with an IDE "Run" button (python project_a/data_prep.py),
+# not only as `python -m project_a.data_prep` from the repo root.
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+
+from project_a.config import load_config  # noqa: E402
+
+REQUIRED_FILES = ["sales_train_evaluation.csv", "calendar.csv", "sell_prices.csv"]
+
+
+def check_input_files(data_dir: Path) -> None:
+    """Stop early with a clear message if a data file is missing."""
+    missing = [f for f in REQUIRED_FILES if not (data_dir / f).exists()]
+    if missing:
+        raise FileNotFoundError(
+            f"Missing in {data_dir}: {missing}\n"
+            f"Put the M5 CSV files in that folder (see README)."
+        )
 
 
 def load_sales(data_dir: Path) -> pd.DataFrame:
@@ -45,6 +62,13 @@ def wide_to_long(sales: pd.DataFrame) -> pd.DataFrame:
     id_cols = ["id", "item_id", "dept_id", "cat_id", "store_id", "state_id"]
     day_cols = [c for c in sales.columns if c.startswith("d_")]
 
+    # Text columns -> category BEFORE the melt. Otherwise the melt copies
+    # every text value into 11 million rows and peaks at ~6 GB of RAM.
+    sales = sales.copy()
+    for col in id_cols:
+        sales[col] = sales[col].astype("category")
+    sales[day_cols] = sales[day_cols].astype("int32")
+
     long = sales.melt(
         id_vars=id_cols,
         value_vars=day_cols,
@@ -53,7 +77,9 @@ def wide_to_long(sales: pd.DataFrame) -> pd.DataFrame:
     )
 
     # Day number as an integer (d_1 -> 1). Makes cutoffs easy later.
-    long["day"] = long["d"].str.replace("d_", "", regex=False).astype("int16")
+    long["d"] = long["d"].astype("category")
+    long["day"] = (long["d"].cat.rename_categories(
+        lambda s: int(s.replace("d_", ""))).astype("int16"))
     # int32, not int16: sums across items/stores can exceed 32,767 and
     # pandas keeps the dtype when summing, so int16 would silently overflow.
     long["sales"] = long["sales"].astype("int32")
@@ -87,10 +113,19 @@ def build_long_table(data_dir: Path) -> pd.DataFrame:
     cal = load_calendar(data_dir)
     prices = load_prices(data_dir)
 
-    # Add calendar info by day id
-    long = long.merge(cal, on="d", how="left")
+    # Add calendar info by day number (int join: much lighter than text "d")
+    cal = cal.copy()
+    cal["day"] = cal["d"].str.replace("d_", "", regex=False).astype("int16")
+    long = long.merge(cal.drop(columns="d"), on="day", how="left")
 
-    # Add weekly price (left join: missing price = item not on sale that week)
+    # Add weekly price (left join: missing price = item not on sale that week).
+    # Join keys as plain strings on the small price table only.
+    prices = prices.copy()
+    prices["store_id"] = prices["store_id"].astype(
+        long["store_id"].dtype)
+    prices["item_id"] = pd.Categorical(
+        prices["item_id"], categories=long["item_id"].cat.categories)
+    prices = prices.dropna(subset=["item_id"])
     long = long.merge(
         prices, on=["store_id", "item_id", "wm_yr_wk"], how="left"
     )
@@ -140,6 +175,7 @@ def main() -> None:
     data_dir = Path(args.data_dir)
     out_dir = Path(args.out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
+    check_input_files(data_dir)
 
     long = build_long_table(data_dir)
     basic_checks(long)

@@ -57,3 +57,31 @@ stress_test:
 simulation:
   n_seeds: 20
   random_seed: 42
+  # one lognormal lead-time draw per purchase order (one PO = one department
+  # shipment). "line" = one draw per item line instead.
+  lead_time_sampling: po
+  # holding cost is charged on DC stock, store stock and DC->store in transit
+  # (all owned by us). Supplier->DC pipeline is the supplier's until it lands.
+
+demand_recovery:
+  # A zero-sales run is flagged as a stockout when, given how often this item
+  # sells on the days around the run, a run this long would happen by chance
+  # with probability below alpha.
+  stockout_alpha: 0.01
+  # A "low" day: sales <= this share of the series' median daily sales.
+  # Slow sellers (median < 10/day) -> only exact zeros count.
+  low_sales_fraction: 0.10
+  neighbour_window_days: 56     # days before and after a run used to judge it
+  # Runs longer than this are treated as "dormant" (item probably not really
+  # on the shelf / phantom listing): demand set to 0, not to the old rate.
+  max_stockout_days: 56
+  # A day is a store closure when the store's total sales fall below this
+  # share of its 28-day rolling median (finds Christmas Day every year).
+  closure_threshold: 0.10
+  # Store-level disruption found in the data (CA_2 sales share fell from
+  # ~16.5% to ~13% of CA, then rose to ~19% after). Dates are inclusive.
+  store_disruptions:
+    - {store: CA_2, start: "2014-10-04", end: "2015-05-26"}
+  # How many days before the cutoff are used for "recent" bias numbers.
+  recent_days: 365
+  injection_test_samples: 3000
